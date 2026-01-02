@@ -1,0 +1,365 @@
+import React, { useState, useEffect, useMemo } from 'react';
+import { initializeApp } from 'firebase/app';
+import { 
+  getFirestore, 
+  collection, 
+  onSnapshot, 
+  doc, 
+  addDoc, 
+  updateDoc, 
+  deleteDoc, 
+  query 
+} from 'firebase/firestore';
+import { 
+  getAuth, 
+  signInAnonymously, 
+  signInWithCustomToken, 
+  onAuthStateChanged 
+} from 'firebase/auth';
+import { 
+  Crown, 
+  CheckCircle2, 
+  Circle, 
+  Zap, 
+  Flame, 
+  Star, 
+  Trash2, 
+  Plus, 
+  Lock,
+  Trophy,
+  BarChart3,
+  ChevronRight
+} from 'lucide-react';
+import { 
+  BarChart, 
+  Bar, 
+  XAxis, 
+  YAxis, 
+  CartesianGrid, 
+  Tooltip, 
+  ResponsiveContainer, 
+  Cell,
+  LineChart,
+  Line
+} from 'recharts';
+
+// Configuración de Firebase
+const firebaseConfig = JSON.parse(__firebase_config);
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'elite-2026-dashboard';
+
+const DAYS_NAMES = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
+const GOLD_GRADIENT = "linear-gradient(135deg, #D4AF37 0%, #F1D37E 50%, #B8860B 100%)";
+
+export default function App() {
+  const [user, setUser] = useState(null);
+  const [habits, setHabits] = useState([]);
+  const [obligations, setObligations] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState('dashboard');
+  const [newHabitName, setNewHabitName] = useState('');
+
+  // 1. Auth
+  useEffect(() => {
+    const initAuth = async () => {
+      if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+        await signInWithCustomToken(auth, __initial_auth_token);
+      } else {
+        await signInAnonymously(auth);
+      }
+    };
+    initAuth();
+    const unsubscribe = onAuthStateChanged(auth, setUser);
+    return () => unsubscribe();
+  }, []);
+
+  // 2. Data Fetching
+  useEffect(() => {
+    if (!user) return;
+
+    const habitsCol = collection(db, 'artifacts', appId, 'users', user.uid, 'habits');
+    const obliCol = collection(db, 'artifacts', appId, 'users', user.uid, 'obligations');
+
+    const unsubHabits = onSnapshot(query(habitsCol), (snap) => {
+      setHabits(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+
+    const unsubObli = onSnapshot(query(obliCol), (snap) => {
+      const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      // Si está vacía, crear la obligación obligatoria por defecto
+      if (data.length === 0) {
+        addDoc(obliCol, { name: 'Tender la cama', completed: false, weight: 25 });
+      }
+      setObligations(data);
+      setLoading(false);
+    });
+
+    return () => { unsubHabits(); unsubObli(); };
+  }, [user]);
+
+  // 3. Logic: Levels & Stats
+  const stats = useMemo(() => {
+    const totalHabitXP = habits.reduce((acc, h) => acc + h.days.filter(d => d).length * 10, 0);
+    const totalObliXP = obligations.filter(o => o.completed).length * 50;
+    const currentXP = totalHabitXP + totalObliXP;
+    
+    const level = Math.floor(currentXP / 200) + 1;
+    const nextLevelXP = level * 200;
+    const progressToNext = (currentXP % 200) / 200 * 100;
+
+    const weeklyData = DAYS_NAMES.map((day, i) => ({
+      name: day,
+      completions: habits.filter(h => h.days[i]).length
+    }));
+
+    return { level, currentXP, nextLevelXP, progressToNext, weeklyData, totalDone: totalHabitXP / 10 + totalObliXP / 50 };
+  }, [habits, obligations]);
+
+  // Handlers
+  const toggleHabit = async (id, dayIdx) => {
+    const habit = habits.find(h => h.id === id);
+    const newDays = [...habit.days];
+    newDays[dayIdx] = !newDays[dayIdx];
+    await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'habits', id), { days: newDays });
+  };
+
+  const toggleObli = async (id, current) => {
+    await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'obligations', id), { completed: !current });
+  };
+
+  const addNewHabit = async (e) => {
+    e.preventDefault();
+    if (!newHabitName) return;
+    await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'habits'), {
+      name: newHabitName,
+      days: new Array(7).fill(false),
+      type: 'habit'
+    });
+    setNewHabitName('');
+  };
+
+  if (loading) return (
+    <div className="min-h-screen bg-[#0a0a0b] flex items-center justify-center">
+      <div className="animate-pulse flex flex-col items-center">
+        <Crown size={48} className="text-[#D4AF37] mb-4" />
+        <p className="text-[#D4AF37] font-bold tracking-widest uppercase text-xs">Cargando Imperio...</p>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="min-h-screen bg-[#0a0a0b] text-slate-100 font-sans selection:bg-amber-500/30">
+      <div className="max-w-6xl mx-auto px-4 py-8">
+        
+        {/* Header Elite */}
+        <header className="flex flex-col md:flex-row justify-between items-start md:items-center mb-12 gap-6">
+          <div className="space-y-1">
+            <h1 className="text-4xl font-black tracking-tighter bg-gradient-to-r from-white via-slate-400 to-amber-600 bg-clip-text text-transparent italic">
+              2026 ELITE PROTOCOL
+            </h1>
+            <p className="text-slate-500 text-xs font-bold uppercase tracking-[0.3em]">No hay espacio para la mediocridad</p>
+          </div>
+
+          <div className="bg-[#141416] border border-amber-500/20 p-4 rounded-2xl flex items-center gap-6 shadow-[0_0_30px_rgba(212,175,55,0.05)]">
+            <div className="text-right">
+              <div className="flex items-center justify-end gap-2 mb-1">
+                <Crown size={14} className="text-[#D4AF37]" />
+                <span className="text-[10px] font-black uppercase text-amber-500 tracking-widest">Nivel {stats.level}</span>
+              </div>
+              <p className="text-xl font-black text-white">{stats.currentXP} <span className="text-xs text-slate-500">/ {stats.nextLevelXP} XP</span></p>
+              <div className="w-32 h-1.5 bg-slate-800 rounded-full mt-2 overflow-hidden">
+                <div 
+                  className="h-full bg-gradient-to-r from-amber-600 to-amber-400 transition-all duration-1000"
+                  style={{ width: `${stats.progressToNext}%` }}
+                />
+              </div>
+            </div>
+            <div className="bg-[#1c1c1f] p-3 rounded-xl border border-white/5">
+              <Zap className="text-orange-500" fill="currentColor" size={20} />
+            </div>
+          </div>
+        </header>
+
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+          
+          {/* Columna Izquierda: Obligaciones e Imperio */}
+          <div className="lg:col-span-8 space-y-8">
+            
+            {/* Sección: Obligaciones Críticas */}
+            <section className="bg-gradient-to-br from-[#1a1a1c] to-[#141416] rounded-3xl p-6 border-l-4 border-orange-600 shadow-xl">
+              <div className="flex items-center gap-3 mb-6">
+                <div className="bg-orange-600/20 p-2 rounded-lg text-orange-500">
+                  <Lock size={18} />
+                </div>
+                <h2 className="text-lg font-black uppercase tracking-widest">Obligaciones Críticas</h2>
+              </div>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {obligations.map(o => (
+                  <button 
+                    key={o.id}
+                    onClick={() => toggleObli(o.id, o.completed)}
+                    className={`flex items-center justify-between p-4 rounded-2xl border transition-all duration-300 ${
+                      o.completed 
+                      ? 'bg-orange-600/10 border-orange-600/40 text-orange-200' 
+                      : 'bg-[#0a0a0b] border-white/5 text-slate-400 hover:border-orange-500/30'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      {o.completed ? <CheckCircle2 size={20} /> : <Circle size={20} />}
+                      <span className="font-bold tracking-tight">{o.name}</span>
+                    </div>
+                    <span className="text-[10px] font-black opacity-50">+50 XP</span>
+                  </button>
+                ))}
+              </div>
+            </section>
+
+            {/* Sección: Protocolos de Hábito */}
+            <section className="bg-[#141416] rounded-3xl border border-white/5 overflow-hidden">
+              <div className="p-6 border-b border-white/5 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <div className="bg-amber-500/10 p-2 rounded-lg text-amber-500">
+                    <BarChart3 size={18} />
+                  </div>
+                  <h2 className="text-lg font-black uppercase tracking-widest text-slate-200">Protocolos de Hábito</h2>
+                </div>
+                <form onSubmit={addNewHabit} className="relative group">
+                  <input 
+                    type="text" 
+                    placeholder="Nuevo Protocolo..."
+                    className="bg-[#0a0a0b] border border-white/10 rounded-xl px-4 py-2 text-sm w-full md:w-64 focus:outline-none focus:border-amber-500/50 transition-all"
+                    value={newHabitName}
+                    onChange={(e) => setNewHabitName(e.target.value)}
+                  />
+                  <button className="absolute right-2 top-1.5 text-amber-500 p-1 hover:bg-amber-500/10 rounded-md">
+                    <Plus size={16} />
+                  </button>
+                </form>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className="text-[10px] uppercase font-black tracking-[0.2em] text-slate-600 bg-[#1a1a1c]/50">
+                      <th className="px-6 py-4 text-left">Protocolo</th>
+                      {DAYS_NAMES.map(d => <th key={d} className="px-2 py-4 text-center">{d}</th>)}
+                      <th className="px-4 py-4 w-10"></th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/5">
+                    {habits.map(habit => (
+                      <tr key={habit.id} className="hover:bg-white/[0.02] group">
+                        <td className="px-6 py-5">
+                          <p className="font-bold text-slate-300 text-sm">{habit.name}</p>
+                          <div className="flex items-center gap-1 mt-1">
+                            <Star size={10} className="text-amber-500" />
+                            <span className="text-[9px] text-slate-500 font-bold uppercase">Consistencia: 80%</span>
+                          </div>
+                        </td>
+                        {habit.days.map((done, idx) => (
+                          <td key={idx} className="px-1 py-5 text-center">
+                            <button 
+                              onClick={() => toggleHabit(habit.id, idx)}
+                              className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all ${
+                                done 
+                                ? 'bg-amber-500 text-[#0a0a0b] shadow-[0_0_15px_rgba(212,175,55,0.3)]' 
+                                : 'bg-slate-900/50 text-slate-700 hover:text-slate-500'
+                              }`}
+                            >
+                              {done ? <CheckCircle2 size={16} /> : <Circle size={16} />}
+                            </button>
+                          </td>
+                        ))}
+                        <td className="px-4 py-5 text-center">
+                          <button 
+                            onClick={() => deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'habits', habit.id))}
+                            className="text-slate-800 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </div>
+
+          {/* Columna Derecha: Inteligencia y Progreso */}
+          <div className="lg:col-span-4 space-y-8">
+            
+            {/* Dashboard Mini Gráfico */}
+            <div className="bg-[#141416] p-6 rounded-3xl border border-white/5">
+              <h3 className="text-xs font-black uppercase text-slate-500 tracking-widest mb-6">Rendimiento 7D</h3>
+              <div className="h-40 w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={stats.weeklyData}>
+                    <defs>
+                      <linearGradient id="goldGradient" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#D4AF37" stopOpacity={0.8}/>
+                        <stop offset="100%" stopColor="#D4AF37" stopOpacity={0}/>
+                      </linearGradient>
+                    </defs>
+                    <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#475569', fontSize: 10}} />
+                    <Tooltip cursor={{fill: 'rgba(255,255,255,0.05)'}} contentStyle={{backgroundColor: '#1a1a1c', border: 'none', borderRadius: '8px'}} />
+                    <Bar dataKey="completions" fill="url(#goldGradient)" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+              <div className="mt-4 flex justify-between items-center text-[10px] font-bold uppercase tracking-tighter text-slate-500">
+                <span>Total logrados</span>
+                <span className="text-amber-500 text-sm font-black">{stats.totalDone}</span>
+              </div>
+            </div>
+
+            {/* Racha y Recompensas */}
+            <div className="relative group overflow-hidden bg-gradient-to-br from-[#221e15] to-[#141416] p-6 rounded-3xl border border-amber-500/20 shadow-lg">
+              <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:scale-110 transition-transform">
+                <Flame size={80} className="text-orange-500" />
+              </div>
+              <div className="relative z-10">
+                <div className="flex items-center gap-2 mb-2">
+                  <Flame className="text-orange-500" size={18} fill="currentColor" />
+                  <span className="text-xs font-black uppercase tracking-widest text-orange-400">Racha de Poder</span>
+                </div>
+                <h4 className="text-3xl font-black text-white">12 DÍAS</h4>
+                <p className="text-[10px] text-slate-400 font-bold uppercase mt-2">Próximo hito: 15 días (+200 XP)</p>
+              </div>
+            </div>
+
+            {/* Frase Millionaire */}
+            <div className="p-8 rounded-3xl bg-[#141416] border border-white/5 relative overflow-hidden">
+               <div className="absolute -left-4 -top-4 text-white/5 font-black text-8xl pointer-events-none">"</div>
+               <p className="text-slate-300 font-medium italic leading-relaxed text-sm">
+                "No esperes resultados de nivel 10 con un esfuerzo de nivel 2. Tu entorno es un reflejo directo de tus hábitos diarios."
+               </p>
+               <div className="mt-4 flex items-center gap-2">
+                 <div className="w-8 h-[1px] bg-amber-500/50"></div>
+                 <span className="text-[10px] font-black uppercase tracking-widest text-amber-600">Protocolo 2026</span>
+               </div>
+            </div>
+
+            {/* Botón de Nivel Superior */}
+            <button className="w-full bg-white text-black font-black py-4 rounded-2xl flex items-center justify-center gap-3 hover:bg-amber-500 transition-all shadow-xl group">
+              <Trophy size={18} />
+              <span className="uppercase tracking-widest text-xs">Ver Clasificación Global</span>
+              <ChevronRight size={16} className="group-hover:translate-x-1 transition-transform" />
+            </button>
+
+          </div>
+        </div>
+
+        <footer className="mt-20 border-t border-white/5 pt-8 text-center">
+          <p className="text-[10px] font-black uppercase text-slate-700 tracking-[0.4em]">
+            System Status: Optimal • 2026 High Performance Infrastructure
+          </p>
+        </footer>
+      </div>
+    </div>
+  );
+}
+
